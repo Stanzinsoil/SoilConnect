@@ -1,0 +1,138 @@
+// services/notificationService.js
+const webpush = require('web-push');
+const Subscription = require('../models/Subscription');
+const Event = require('../models/Event');
+
+// Send notification for new events
+async function notifyNewEvents() {
+    try {
+        // Get events added in the last 24 hours
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        const newEvents = await Event.find({
+            createdAt: { $gte: yesterday }
+        });
+        
+        if (newEvents.length === 0) {
+            console.log('No new events to notify about');
+            return;
+        }
+        
+        // Get all active subscriptions
+        const subscriptions = await Subscription.find({ active: true });
+        
+        if (subscriptions.length === 0) {
+            console.log('No active subscriptions to notify');
+            return;
+        }
+        
+        // Prepare notification content
+        const notificationTitle = `${newEvents.length} New Soil Science Events Added`;
+        let notificationBody = 'New events include: ';
+        
+        // Add up to 3 event titles to the notification body
+        const eventTitles = newEvents.slice(0, 3).map(event => event.title);
+        notificationBody += eventTitles.join(', ');
+        
+        if (newEvents.length > 3) {
+            notificationBody += ` and ${newEvents.length - 3} more`;
+        }
+        
+        // Send notifications to all subscribers
+        const notificationPromises = subscriptions.map(subscription => {
+            const pushSubscription = {
+                endpoint: subscription.endpoint,
+                keys: {
+                    p256dh: subscription.p256dh,
+                    auth: subscription.auth
+                }
+            };
+            
+            const payload = JSON.stringify({
+                title: notificationTitle,
+                body: notificationBody,
+                icon: '/images/logo.png',
+                badge: '/images/badge.png',
+                data: {
+                    url: '/events'
+                }
+            });
+            
+            return webpush.sendNotification(pushSubscription, payload)
+                .catch(error => {
+                    console.error('Error sending notification:', error);
+                    
+                    // If subscription is invalid, mark it as inactive
+                    if (error.statusCode === 410) {
+                        return Subscription.findByIdAndUpdate(subscription._id, { active: false });
+                    }
+                });
+        });
+        
+        await Promise.all(notificationPromises);
+        console.log(`Sent notifications about new events to ${subscriptions.length} subscribers`);
+    } catch (error) {
+        console.error('Error in notifyNewEvents:', error);
+    }
+}
+
+// Send notification for upcoming deadlines
+async function notifyUpcomingDeadlines() {
+    try {
+        // Get events with deadlines in the next 7 days
+        const today = new Date();
+        const nextWeek = new Date();
+        nextWeek.setDate(nextWeek.getDate() + 7);
+        
+        const upcomingDeadlines = await Event.find({
+            deadlineDate: { 
+                $gte: today,
+                $lte: nextWeek
+            }
+        });
+        
+        if (upcomingDeadlines.length === 0) {
+            console.log('No upcoming deadlines to notify about');
+            return;
+        }
+        
+        // Get all active subscriptions
+        const subscriptions = await Subscription.find({ active: true });
+        
+        if (subscriptions.length === 0) {
+            console.log('No active subscriptions to notify');
+            return;
+        }
+        
+        // Prepare notification content
+        const notificationTitle = `${upcomingDeadlines.length} Upcoming Deadlines`;
+        let notificationBody = 'Deadlines approaching for: ';
+        
+        // Add up to 3 event titles to the notification body
+        const eventTitles = upcomingDeadlines.slice(0, 3).map(event => event.title);
+        notificationBody += eventTitles.join(', ');
+        
+        if (upcomingDeadlines.length > 3) {
+            notificationBody += ` and ${upcomingDeadlines.length - 3} more`;
+        }
+        
+        // Send notifications to all subscribers
+        const notificationPromises = subscriptions.map(subscription => {
+            const pushSubscription = {
+                endpoint: subscription.endpoint,
+                keys: {
+                    p256dh: subscription.p256dh,
+                    auth: subscription.auth
+                }
+            };
+            
+            const payload = JSON.stringify({
+                title: notificationTitle,
+                body: notificationBody,
+                icon: '/images/logo.png',
+                badge: '/images/badge.png',
+                data: {
+                    url: '/events'
+                }
+            });

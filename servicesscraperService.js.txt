@@ -1,0 +1,247 @@
+// services/scraperService.js
+const axios = require('axios');
+const cheerio = require('cheerio');
+const Event = require('../models/Event');
+
+// Sources to scrape
+const sources = [
+    {
+        name: 'IUSS',
+        url: 'https://www.iuss.org/meetings-events/',
+        scraper: scrapeIUSS
+    },
+    {
+        name: 'FAO',
+        url: 'https://www.fao.org/global-soil-partnership/resources/events/en/',
+        scraper: scrapeFAO
+    },
+    {
+        name: 'AllConferenceAlert',
+        url: 'https://www.allconferencealert.com/soil.html',
+        scraper: scrapeAllConferenceAlert
+    }
+];
+
+// Main function to scrape all sources
+async function scrapeAllSources() {
+    console.log('Starting to scrape all sources');
+    
+    for (const source of sources) {
+        try {
+            console.log(`Scraping ${source.name} from ${source.url}`);
+            const events = await source.scraper(source.url);
+            
+            // Save events to database
+            for (const event of events) {
+                try {
+                    // Check if event already exists
+                    const existingEvent = await Event.findOne({ 
+                        title: event.title,
+                        startDate: event.startDate
+                    });
+                    
+                    if (!existingEvent) {
+                        const newEvent = new Event({
+                            ...event,
+                            source: source.name
+                        });
+                        await newEvent.save();
+                        console.log(`Saved new event: ${event.title}`);
+                    }
+                } catch (error) {
+                    console.error(`Error saving event ${event.title}:`, error);
+                }
+            }
+        } catch (error) {
+            console.error(`Error scraping ${source.name}:`, error);
+        }
+    }
+}
+
+// IUSS scraper
+async function scrapeIUSS(url) {
+    try {
+        const response = await axios.get(url);
+        const $ = cheerio.load(response.data);
+        const events = [];
+        
+        // Implement specific scraping logic for IUSS website
+        $('.event-item').each((i, el) => {
+            const title = $(el).find('.event-title').text().trim();
+            const dateText = $(el).find('.event-date').text().trim();
+            const location = $(el).find('.event-location').text().trim();
+            const description = $(el).find('.event-description').text().trim();
+            const link = $(el).find('a').attr('href');
+            
+            // Parse dates
+            const dates = parseDateRange(dateText);
+            
+            events.push({
+                title,
+                description,
+                startDate: dates.startDate,
+                endDate: dates.endDate,
+                location,
+                url: link,
+                eventType: determineEventType(title),
+                tags: extractTags(title, description)
+            });
+        });
+        
+        return events;
+    } catch (error) {
+        console.error('Error in IUSS scraper:', error);
+        return [];
+    }
+}
+
+// FAO scraper
+async function scrapeFAO(url) {
+    try {
+        const response = await axios.get(url);
+        const $ = cheerio.load(response.data);
+        const events = [];
+        
+        // Implement specific scraping logic for FAO website
+        $('.event-card').each((i, el) => {
+            const title = $(el).find('.event-title').text().trim();
+            const dateText = $(el).find('.event-date').text().trim();
+            const location = $(el).find('.event-venue').text().trim();
+            const description = $(el).find('.event-description').text().trim();
+            const link = $(el).find('a.event-link').attr('href');
+            
+            // Parse dates
+            const dates = parseDateRange(dateText);
+            
+            events.push({
+                title,
+                description,
+                startDate: dates.startDate,
+                endDate: dates.endDate,
+                location,
+                url: link,
+                eventType: determineEventType(title),
+                tags: extractTags(title, description)
+            });
+        });
+        
+        return events;
+    } catch (error) {
+        console.error('Error in FAO scraper:', error);
+        return [];
+    }
+}
+
+// AllConferenceAlert scraper
+async function scrapeAllConferenceAlert(url) {
+    try {
+        const response = await axios.get(url);
+        const $ = cheerio.load(response.data);
+        const events = [];
+        
+        // Implement specific scraping logic for AllConferenceAlert website
+        $('.conference-item').each((i, el) => {
+            const title = $(el).find('.conf-title').text().trim();
+            const dateText = $(el).find('.conf-date').text().trim();
+            const location = $(el).find('.conf-location').text().trim();
+            const description = $(el).find('.conf-description').text().trim();
+            const link = $(el).find('a.conf-link').attr('href');
+            
+            // Parse dates
+            const dates = parseDateRange(dateText);
+            
+            events.push({
+                title,
+                description,
+                startDate: dates.startDate,
+                endDate: dates.endDate,
+                location,
+                url: link,
+                eventType: determineEventType(title),
+                tags: extractTags(title, description)
+            });
+        });
+        
+        return events;
+    } catch (error) {
+        console.error('Error in AllConferenceAlert scraper:', error);
+        return [];
+    }
+}
+
+// Helper function to parse date ranges
+function parseDateRange(dateText) {
+    // Implement date parsing logic
+    // This is a simplified example
+    try {
+        if (dateText.includes('-')) {
+            const [startStr, endStr] = dateText.split('-').map(d => d.trim());
+            return {
+                startDate: new Date(startStr),
+                endDate: new Date(endStr)
+            };
+        } else {
+            const date = new Date(dateText);
+            return {
+                startDate: date,
+                endDate: date
+            };
+        }
+    } catch (error) {
+        console.error('Error parsing date:', dateText, error);
+        return {
+            startDate: null,
+            endDate: null
+        };
+    }
+}
+
+// Helper function to determine event type
+function determineEventType(title) {
+    const title_lower = title.toLowerCase();
+    
+    if (title_lower.includes('conference')) return 'Conference';
+    if (title_lower.includes('workshop')) return 'Workshop';
+    if (title_lower.includes('webinar')) return 'Webinar';
+    if (title_lower.includes('symposium')) return 'Symposium';
+    if (title_lower.includes('training')) return 'Training';
+    
+    return 'Conference'; // Default
+}
+
+// Helper function to extract tags
+function extractTags(title, description) {
+    const tags = [];
+    const combinedText = (title + ' ' + description).toLowerCase();
+    
+    // Check for common soil science topics
+    if (combinedText.includes('digital soil mapping') || combinedText.includes('dsm')) 
+        tags.push('Digital Soil Mapping');
+    
+    if (combinedText.includes('remote sensing') || combinedText.includes('gis')) 
+        tags.push('Remote Sensing & GIS');
+    
+    if (combinedText.includes('machine learning') || combinedText.includes('artificial intelligence') || combinedText.includes('ai')) 
+        tags.push('Machine Learning & AI');
+    
+    if (combinedText.includes('microbiome') || combinedText.includes('microbial')) 
+        tags.push('Soil Microbiome');
+    
+    if (combinedText.includes('carbon') || combinedText.includes('sequestration') || combinedText.includes('climate')) 
+        tags.push('Carbon Sequestration');
+    
+    if (combinedText.includes('soil health') || combinedText.includes('soil quality')) 
+        tags.push('Soil Health');
+    
+    if (combinedText.includes('precision agriculture') || combinedText.includes('sensor')) 
+        tags.push('Precision Agriculture');
+    
+    if (combinedText.includes('data') || combinedText.includes('fair principles')) 
+        tags.push('Soil Data');
+    
+    return tags;
+}
+
+module.exports = {
+    scrapeAllSources
+};
